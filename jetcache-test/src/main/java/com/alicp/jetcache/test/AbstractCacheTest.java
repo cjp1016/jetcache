@@ -1,15 +1,18 @@
 package com.alicp.jetcache.test;
 
 import com.alicp.jetcache.*;
-import com.alicp.jetcache.support.JetCacheExecutor;
 import com.alicp.jetcache.test.support.DynamicQuery;
 import org.junit.Assert;
 
 import java.io.Serializable;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
 
 /**
  * Created on 2016/10/8.
@@ -52,6 +55,8 @@ public abstract class AbstractCacheTest {
         complextValueTest();
 
         asyncTest();
+
+        penetrationProtectTest(cache);
     }
 
     private void illegalArgTest() {
@@ -81,7 +86,7 @@ public abstract class AbstractCacheTest {
             Assert.assertEquals(CacheResult.MSG_ILLEGAL_ARGUMENT, cache.PUT_IF_ABSENT(null, "V1", 1, TimeUnit.SECONDS).getMessage());
         } catch (UnsupportedOperationException e) {
             Cache c = cache;
-            while(c instanceof ProxyCache) {
+            while (c instanceof ProxyCache) {
                 c = ((ProxyCache) c).getTargetCache();
             }
             if (c instanceof MultiLevelCache) {
@@ -455,9 +460,10 @@ public abstract class AbstractCacheTest {
             });
             Assert.fail();
         } catch (Exception e) {
-            try(AutoReleaseLock lock = cache.tryLock("LockKeyAndRunKey", 1, TimeUnit.SECONDS)){
+            try (AutoReleaseLock lock = cache.tryLock("LockKeyAndRunKey", 1, TimeUnit.SECONDS)) {
                 Assert.assertNotNull(lock);
-            };
+            }
+            ;
         }
     }
 
@@ -673,5 +679,151 @@ public abstract class AbstractCacheTest {
         Assert.assertEquals(lockAtommicCount2.get(), lockCount2.get());
 
         Assert.assertFalse(cocurrentFail);
+    }
+
+    public static void penetrationProtectTest(Cache cache) throws Exception {
+        boolean oldPenetrationProtect = cache.config().isCachePenetrationProtect();
+        cache.config().setCachePenetrationProtect(true);
+
+        penetrationProtectTestWithComputeIfAbsent(cache);
+        if (cache instanceof LoadingCache) {
+            penetrationProtectTestWithLoadingCache(cache);
+        }
+
+        cache.config().setCachePenetrationProtect(oldPenetrationProtect);
+    }
+
+    private static void penetrationProtectTestWithComputeIfAbsent(Cache cache) throws Exception {
+        String keyPrefix = "penetrationProtect_";
+
+        AtomicInteger loadSuccess = new AtomicInteger(0);
+        Function loader = new Function() {
+            private AtomicInteger count1 = new AtomicInteger(0);
+            private AtomicInteger count2 = new AtomicInteger(0);
+
+            @Override
+            public Object apply(Object k) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                if ((keyPrefix + "1").equals(k)) {
+                    // fail 2 times
+                    if (count1.getAndIncrement() <= 1)
+                        throw new RuntimeException("mock error");
+                } else if ((keyPrefix + "2").equals(k)) {
+                    // fail 3 times
+                    if (count2.getAndIncrement() <= 2)
+                        throw new RuntimeException("mock error");
+                }
+                loadSuccess.incrementAndGet();
+                return k + "_V";
+            }
+        };
+
+        int threadCount = 20;
+        CountDownLatch countDownLatch = new CountDownLatch(threadCount);
+        AtomicInteger getFailCount = new AtomicInteger(0);
+        AtomicBoolean fail = new AtomicBoolean(false);
+        for (int i = 0; i < threadCount; i++) {
+            final int index = i;
+            Thread t = new Thread(() -> {
+                String key = keyPrefix + (index % 3);
+                try {
+                    Object o = cache.computeIfAbsent(key, loader);
+                    if (!o.equals(key + "_V")) {
+                        fail.set(true);
+                    }
+                } catch (Throwable e) {
+                    if(!"mock error".equals(e.getMessage())){
+                        e.printStackTrace();
+                    }
+                    getFailCount.incrementAndGet();
+                }
+                countDownLatch.countDown();
+            });
+            t.start();
+        }
+        countDownLatch.await();
+
+        Assert.assertFalse(fail.get());
+        Assert.assertEquals(3, loadSuccess.get());
+        Assert.assertEquals(2 + 3, getFailCount.get());
+
+        cache.remove(keyPrefix + "0");
+        cache.remove(keyPrefix + "1");
+        cache.remove(keyPrefix + "2");
+    }
+
+    private static void penetrationProtectTestWithLoadingCache(Cache cache) throws Exception {
+        String failMsg[] = new String[1];
+
+        Function<Integer, Integer> loaderFunction = new Function<Integer, Integer>() {
+            ConcurrentHashMap<Integer, Integer> map = new ConcurrentHashMap<>();
+            @Override
+            public Integer apply(Integer key) {
+                try {
+                    Thread.sleep(50);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                if (map.get(key) == null) {
+                    map.put(key, key);
+                } else {
+                    failMsg[0] = "each key should load only once";
+                }
+                return key + 100;
+            }
+        };
+        CacheLoader<Integer, Integer> loader = (k) -> loaderFunction.apply(k);
+
+        CacheLoader oldLoader = cache.config().getLoader();
+        cache.config().setLoader(loader);
+
+        CountDownLatch countDownLatch = new CountDownLatch(5);
+        Cache<Integer, Integer> c = cache;
+        new Thread(() -> {
+            if (c.get(2000) != 2100) {
+                failMsg[0] = "value error";
+            }
+            countDownLatch.countDown();
+        }).start();
+        new Thread(() -> {
+            if (c.get(2000) != 2100) {
+                failMsg[0] = "value error";
+            }
+            countDownLatch.countDown();
+        }).start();
+        new Thread(() -> {
+            if (c.get(2001) != 2101) {
+                failMsg[0] = "value error";
+            }
+            countDownLatch.countDown();
+        }).start();
+        new Thread(() -> {
+            if (c.computeIfAbsent(2001, loaderFunction) != 2101) {
+                failMsg[0] = "value error";
+            }
+            countDownLatch.countDown();
+        }).start();
+        new Thread(() -> {
+            Set<Integer> s = new HashSet<>();
+            s.add(2001);
+            s.add(2002);
+            Map<Integer, Integer> values = c.getAll(s);
+            if (values.get(2001) != 2101) {
+                failMsg[0] = "value error";
+            }
+            if (values.get(2002) != 2102) {
+                failMsg[0] = "value error";
+            }
+            countDownLatch.countDown();
+        }).start();
+        countDownLatch.await();
+
+        Assert.assertNull(failMsg[0]);
+
+        cache.config().setLoader(oldLoader);
     }
 }

@@ -17,6 +17,7 @@ public class CachedAnnoConfig extends CacheAnnoConfig {
     private boolean enabled;
     private TimeUnit timeUnit;
     private long expire;
+    private long localExpire;
     private CacheType cacheType;
     private int localLimit;
     private boolean cacheNullValue;
@@ -25,6 +26,7 @@ public class CachedAnnoConfig extends CacheAnnoConfig {
 
     private Function<Object, Boolean> unlessEvaluator;
     private RefreshPolicy refreshPolicy;
+    private PenetrationProtectConfig penetrationProtectConfig;
 
     public boolean isEnabled() {
         return enabled;
@@ -104,5 +106,21 @@ public class CachedAnnoConfig extends CacheAnnoConfig {
 
     public void setRefreshPolicy(RefreshPolicy refreshPolicy) {
         this.refreshPolicy = refreshPolicy;
+    }
+
+    public PenetrationProtectConfig getPenetrationProtectConfig() {
+        return penetrationProtectConfig;
+    }
+
+    public void setPenetrationProtectConfig(PenetrationProtectConfig penetrationProtectConfig) {
+        this.penetrationProtectConfig = penetrationProtectConfig;
+    }
+
+    public long getLocalExpire() {
+        return localExpire;
+    }
+
+    public void setLocalExpire(long localExpire) {
+        this.localExpire = localExpire;
     }
 }

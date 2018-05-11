@@ -2,13 +2,14 @@ package com.alicp.jetcache.anno.field;
 
 import com.alicp.jetcache.*;
 import com.alicp.jetcache.anno.CacheConsts;
+import com.alicp.jetcache.anno.CachePenetrationProtect;
 import com.alicp.jetcache.anno.CacheRefresh;
 import com.alicp.jetcache.anno.CreateCache;
 import com.alicp.jetcache.anno.method.CacheConfigUtil;
-import com.alicp.jetcache.anno.method.ClassUtil;
 import com.alicp.jetcache.anno.support.CacheNameGenerator;
 import com.alicp.jetcache.anno.support.CachedAnnoConfig;
 import com.alicp.jetcache.anno.support.GlobalCacheConfig;
+import com.alicp.jetcache.anno.support.PenetrationProtectConfig;
 import org.springframework.beans.factory.config.ConfigurableListableBeanFactory;
 
 import java.lang.reflect.Field;
@@ -31,6 +32,7 @@ class LazyInitCache implements ProxyCache {
     private CreateCache ann;
     private Field field;
     private RefreshPolicy refreshPolicy;
+    private PenetrationProtectConfig protectConfig;
 
     public LazyInitCache(ConfigurableListableBeanFactory beanFactory, CreateCache ann, Field field) {
         this.beanFactory = beanFactory;
@@ -39,6 +41,11 @@ class LazyInitCache implements ProxyCache {
         CacheRefresh cr = field.getAnnotation(CacheRefresh.class);
         if (cr != null) {
             refreshPolicy = CacheConfigUtil.parseRefreshPolicy(cr);
+        }
+        CachePenetrationProtect penetrateProtect = field.getAnnotation(CachePenetrationProtect.class);
+        if (penetrateProtect != null) {
+            protectConfig = new PenetrationProtectConfig();
+            protectConfig.setPenetrationProtect(penetrateProtect.value());
         }
     }
 
@@ -70,15 +77,17 @@ class LazyInitCache implements ProxyCache {
         cac.setName(ann.name());
         cac.setTimeUnit(ann.timeUnit());
         cac.setExpire(ann.expire());
+        cac.setLocalExpire(ann.localExpire());
         cac.setCacheType(ann.cacheType());
         cac.setLocalLimit(ann.localLimit());
         cac.setSerialPolicy(ann.serialPolicy());
         cac.setKeyConvertor(ann.keyConvertor());
 
         cac.setRefreshPolicy(refreshPolicy);
+        cac.setPenetrationProtectConfig(protectConfig);
 
         String cacheName = cac.getName();
-        if (CacheConsts.UNDEFINED_STRING.equalsIgnoreCase(cacheName)) {
+        if (CacheConsts.isUndefined(cacheName)) {
             String[] hiddenPackages = globalCacheConfig.getHiddenPackages();
             CacheNameGenerator g = globalCacheConfig.getConfigProvider().createCacheNameGenerator(hiddenPackages);
             cacheName = g.generateCacheName(field);

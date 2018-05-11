@@ -99,6 +99,7 @@ public class CacheHandler implements InvocationHandler {
 
     private static Object invokeWithInvalidateOrUpdate(CacheInvokeContext context) throws Throwable {
         Object originResult = invokeOrigin(context);
+        context.setResult(originResult);
         CacheInvokeConfig cic = context.getCacheInvokeConfig();
 
         if (cic.getInvalidateAnnoConfig() != null) {
@@ -155,6 +156,8 @@ public class CacheHandler implements InvocationHandler {
                 }
             });
             if (cache instanceof CacheHandlerRefreshCache) {
+                // We invoke addOrUpdateRefreshTask manually
+                // because the cache has no loader(GET method will not invoke it)
                 ((CacheHandlerRefreshCache) cache).addOrUpdateRefreshTask(key, (unusedKey) -> invokeOrigin(context));
             }
             return result;

@@ -16,7 +16,10 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Random;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
 /**
  * @author <a href="mailto:areyouok@gmail.com">huangli</a>
@@ -32,7 +35,7 @@ public class ProxyUtilTest {
     }
 
     @AfterEach
-    public void stop(){
+    public void stop() {
         globalCacheConfig.shutdown();
     }
 
@@ -50,7 +53,7 @@ public class ProxyUtilTest {
             return count++;
         }
 
-        public int countWithoutCache(){
+        public int countWithoutCache() {
             return count++;
         }
     }
@@ -69,6 +72,7 @@ public class ProxyUtilTest {
     public interface I2 {
         @Cached
         int count();
+
         int countWithoutCache();
     }
 
@@ -78,17 +82,20 @@ public class ProxyUtilTest {
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
     }
+
     public class C22 implements I2 {
         int count;
 
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
     }
@@ -116,6 +123,7 @@ public class ProxyUtilTest {
 
     public interface I3_2 extends I3_1 {
         int count();
+
         int countWithoutCache();
     }
 
@@ -125,7 +133,8 @@ public class ProxyUtilTest {
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
 
@@ -144,6 +153,7 @@ public class ProxyUtilTest {
 
     public interface I4_1 {
         int count();
+
         int countWithoutCache();
     }
 
@@ -158,7 +168,8 @@ public class ProxyUtilTest {
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
     }
@@ -176,6 +187,7 @@ public class ProxyUtilTest {
 
     public interface I5 {
         int count();
+
         int countWithoutCache();
     }
 
@@ -186,7 +198,8 @@ public class ProxyUtilTest {
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
     }
@@ -211,6 +224,7 @@ public class ProxyUtilTest {
 
     public interface I6 {
         int count();
+
         int countWithoutCache();
     }
 
@@ -222,7 +236,8 @@ public class ProxyUtilTest {
         public int count() {
             return count++;
         }
-        public int countWithoutCache(){
+
+        public int countWithoutCache() {
             return count++;
         }
     }
@@ -240,11 +255,13 @@ public class ProxyUtilTest {
 
     public interface I7_1 {
         int count();
+
         int countWithoutCache();
     }
 
     public class C7_1 implements I7_1 {
         int count;
+
         @Cached(enabled = false)
         public int count() {
             return count++;
@@ -258,6 +275,7 @@ public class ProxyUtilTest {
 
     public interface I7_2 {
         int count();
+
         int countWithoutCache();
     }
 
@@ -268,8 +286,9 @@ public class ProxyUtilTest {
         public int count() {
             return service.count();
         }
+
         @EnableCache
-        public int countWithoutCache(){
+        public int countWithoutCache() {
             return service.countWithoutCache();
         }
     }
@@ -303,6 +322,12 @@ public class ProxyUtilTest {
 
         @CacheInvalidate(name = "c2", key = "args[0]")
         void delete2(String id);
+
+        @CacheUpdate(name = "c1", key = "#id", value="#result")
+        int randomUpdate(String id);
+
+        @CacheUpdate(name = "c1", key = "#id", value="result")
+        int randomUpdate2(String id);
     }
 
     public class C8 implements I8 {
@@ -339,6 +364,16 @@ public class ProxyUtilTest {
         public void delete2(String theId) {
             m.remove(theId);
         }
+
+        @Override
+        public int randomUpdate(String id) {
+            return new Random().nextInt();
+        }
+
+        @Override
+        public int randomUpdate2(String id) {
+            return new Random().nextInt();
+        }
     }
 
 
@@ -365,6 +400,8 @@ public class ProxyUtilTest {
         assertEquals(i8_proxy.count("K1"), i8_proxy.count("K1"));
         assertNotEquals(i8_proxy.count("K1"), i8_proxy.count("K2"));
 
+        assertEquals(i8_proxy.randomUpdate("K1"), i8_proxy.count("K1"));
+        assertEquals(i8_proxy.randomUpdate2("K1"), i8_proxy.count("K1"));
     }
 
     public interface I9 {
@@ -372,7 +409,7 @@ public class ProxyUtilTest {
         @CacheRefresh(refresh = 100, timeUnit = TimeUnit.MILLISECONDS)
         int count();
 
-        @Cached(key="#a", cacheType = CacheType.BOTH)
+        @Cached(key = "#a", cacheType = CacheType.BOTH)
         @CacheRefresh(refresh = 100, timeUnit = TimeUnit.MILLISECONDS)
         int count(int a, int b);
     }
@@ -409,6 +446,80 @@ public class ProxyUtilTest {
             Thread.sleep(150);
             assertEquals(x1 + 1, beanProxy.count(1, 400));
         }
-        globalCacheConfig.shutdown();
+    }
+
+    public interface I10 {
+        @Cached
+        int count1(int p);
+
+        @Cached
+        @CachePenetrationProtect
+        int count2(int p);
+    }
+
+    public class C10 implements I10 {
+        int count1;
+        int count2;
+
+        @Override
+        public int count1(int p) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return count1++;
+        }
+
+        @Override
+        public int count2(int p) {
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            }
+            return count2++;
+        }
+    }
+
+    @Test
+    // protect test
+    public void testGetProxyByAnnotation10() throws Exception {
+        I10 beanProxy = ProxyUtil.getProxyByAnnotation(new C10(), globalCacheConfig);
+
+        // preheat
+        beanProxy.count1(1);
+        beanProxy.count2(1);
+
+        {
+            int[] x = new int[1];
+            int[] y = new int[1];
+            CountDownLatch countDownLatch = new CountDownLatch(2);
+            new Thread(() -> {
+                x[0] = beanProxy.count1(2);
+                countDownLatch.countDown();
+            }).start();
+            new Thread(() -> {
+                y[0] = beanProxy.count1(2);
+                countDownLatch.countDown();
+            }).start();
+            countDownLatch.await();
+            assertNotEquals(x[0], y[0]);
+        }
+        {
+            int[] x = new int[1];
+            int[] y = new int[1];
+            CountDownLatch countDownLatch = new CountDownLatch(2);
+            new Thread(() -> {
+                x[0] = beanProxy.count2(2);
+                countDownLatch.countDown();
+            }).start();
+            new Thread(() -> {
+                y[0] = beanProxy.count2(2);
+                countDownLatch.countDown();
+            }).start();
+            countDownLatch.await();
+            assertEquals(x[0], y[0]);
+        }
     }
 }
